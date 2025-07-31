@@ -1,0 +1,1058 @@
+openapi: 3.0.3
+info:
+  title: ParkWise API
+  description: |
+    ParkWise is a comprehensive parking management system that allows users to find, reserve, and manage parking spots. 
+    The API supports both regular users and administrators with different levels of access.
+    
+    **Features:**
+    - User registration and authentication
+    - Parking lot management (Admin only)
+    - Spot reservation and release
+    - Real-time availability tracking
+    - Cost calculation with detailed breakdowns
+    - Statistics and analytics
+    - CSV data export
+    - Email notifications and reports
+    - Redis caching for performance
+    
+    **Authentication:**
+    - JWT token-based authentication
+    - Role-based access control (user/admin)
+    
+  version: 1.0.0
+  contact:
+    name: ParkWise Support
+
+servers:
+  - url: http://localhost:5000
+    description: Development server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================== HEALTH CHECK ====================
+  /:
+    get:
+      summary: Health check endpoint
+      description: Check if the backend server is running
+      tags:
+        - Health
+      security: []
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "Backend is running"
+
+  # ==================== AUTHENTICATION ====================
+  /api/register:
+    post:
+      summary: Register a new user
+      description: Create a new user account in the system
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+              properties:
+                username:
+                  type: string
+                  example: "john_doe"
+                email:
+                  type: string
+                  format: email
+                  example: "john@example.com"
+                password:
+                  type: string
+                  format: password
+                  example: "securepassword123"
+                phone:
+                  type: string
+                  example: "+1234567890"
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "User registered successfully"
+        '400':
+          description: User already exists or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/login:
+    post:
+      summary: User login
+      description: Authenticate user and receive JWT token
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: "john_doe"
+                password:
+                  type: string
+                  format: password
+                  example: "securepassword123"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ==================== PARKING LOTS MANAGEMENT ====================
+  /api/parking-lots:
+    get:
+      summary: Get all parking lots
+      description: Retrieve list of all parking lots with availability information
+      tags:
+        - Parking Lots
+      responses:
+        '200':
+          description: List of parking lots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ParkingLot'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      summary: Create a new parking lot
+      description: Create a new parking lot (Admin only)
+      tags:
+        - Parking Lots
+        - Admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateParkingLotRequest'
+      responses:
+        '201':
+          description: Parking lot created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Parking lot created successfully"
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/parking-lots/{lot_id}:
+    put:
+      summary: Update parking lot
+      description: Update an existing parking lot (Admin only)
+      tags:
+        - Parking Lots
+        - Admin
+      parameters:
+        - name: lot_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Parking lot ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateParkingLotRequest'
+      responses:
+        '200':
+          description: Parking lot updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Parking lot updated successfully"
+        '400':
+          description: Cannot reduce spots with occupied spaces
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      summary: Delete parking lot
+      description: Delete a parking lot (Admin only)
+      tags:
+        - Parking Lots
+        - Admin
+      parameters:
+        - name: lot_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Parking lot ID
+      responses:
+        '200':
+          description: Parking lot deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Parking lot deleted successfully"
+        '400':
+          description: Cannot delete lot with occupied spots
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ==================== RESERVATIONS ====================
+  /api/reserve-spot:
+    post:
+      summary: Reserve a parking spot
+      description: Reserve an available parking spot
+      tags:
+        - Reservations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - lot_id
+                - vehicle_number
+              properties:
+                lot_id:
+                  type: integer
+                  example: 1
+                vehicle_number:
+                  type: string
+                  example: "ABC-123"
+      responses:
+        '201':
+          description: Spot reserved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Spot reserved successfully"
+                  reservation_id:
+                    type: integer
+                    example: 1
+                  spot_number:
+                    type: integer
+                    example: 5
+                  initial_cost:
+                    type: number
+                    example: 10.0
+                  lot_name:
+                    type: string
+                    example: "Downtown Mall"
+        '400':
+          description: No available spots or user already has active reservation
+        '404':
+          description: Parking lot not found
+
+  /api/release-spot/{reservation_id}:
+    put:
+      summary: Release a parking spot
+      description: Release a reserved parking spot and calculate final cost
+      tags:
+        - Reservations
+      parameters:
+        - name: reservation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Reservation ID
+      responses:
+        '200':
+          description: Spot released successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Spot released successfully"
+                  cost_breakdown:
+                    $ref: '#/components/schemas/CostBreakdown'
+                  total_cost:
+                    type: number
+                    example: 25.50
+                  duration_hours:
+                    type: number
+                    example: 2.5
+        '400':
+          description: Spot already released
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/user-reservations:
+    get:
+      summary: Get user's reservations
+      description: Retrieve all reservations for the authenticated user
+      tags:
+        - Reservations
+      responses:
+        '200':
+          description: List of user reservations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Reservation'
+
+  /api/all-reservations:
+    get:
+      summary: Get all reservations
+      description: Retrieve all reservations in the system (Admin only)
+      tags:
+        - Reservations
+        - Admin
+      responses:
+        '200':
+          description: List of all reservations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminReservation'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/reservations/{lot_id}:
+    get:
+      summary: Get reservations by parking lot
+      description: Get reservation details for a specific parking lot (Admin only)
+      tags:
+        - Reservations
+        - Admin
+      parameters:
+        - name: lot_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Parking lot ID
+      responses:
+        '200':
+          description: Parking lot reservation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotReservationDetails'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ==================== ADMIN DASHBOARD ====================
+  /api/admin/dashboard:
+    get:
+      summary: Get admin dashboard data
+      description: Retrieve dashboard statistics for admin panel
+      tags:
+        - Admin
+        - Dashboard
+      responses:
+        '200':
+          description: Admin dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDashboard'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/admin/users:
+    get:
+      summary: Get all users
+      description: Retrieve list of all registered users (Admin only)
+      tags:
+        - Admin
+        - Users
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminUserView'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ==================== STATISTICS ====================
+  /api/admin/statistics:
+    get:
+      summary: Get admin statistics
+      description: Retrieve detailed statistics for admin dashboard charts
+      tags:
+        - Admin
+        - Statistics
+      responses:
+        '200':
+          description: Admin statistics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStatistics'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/user/statistics:
+    get:
+      summary: Get user statistics
+      description: Retrieve personal statistics for user dashboard
+      tags:
+        - Statistics
+      responses:
+        '200':
+          description: User statistics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStatistics'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== DATA EXPORT ====================
+  /api/export-csv:
+    post:
+      summary: Export user data to CSV
+      description: Start background job to export user parking data to CSV
+      tags:
+        - Export
+      responses:
+        '202':
+          description: Export job started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Export job started"
+                  task_id:
+                    type: string
+                    example: "abc123-def456"
+                  user_id:
+                    type: string
+                    example: "1"
+                  user_role:
+                    type: string
+                    example: "user"
+
+  /api/download-csv/{download_key}:
+    get:
+      summary: Download CSV file
+      description: Download the generated CSV file using the download key
+      tags:
+        - Export
+      parameters:
+        - name: download_key
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Download key received from export job
+      responses:
+        '200':
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: File not found or expired
+
+  # ==================== BACKGROUND TASKS ====================
+  /api/task-status/{task_id}:
+    get:
+      summary: Get task status
+      description: Check the status of a background task
+      tags:
+        - Tasks
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID
+      responses:
+        '200':
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatus'
+
+  /api/trigger-reminders:
+    post:
+      summary: Trigger daily reminders
+      description: Send daily reminder emails to users (Admin only)
+      tags:
+        - Admin
+        - Tasks
+      responses:
+        '200':
+          description: Reminder task started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+                    example: "reminder-abc123"
+                  user_id:
+                    type: string
+                    example: "1"
+                  user_role:
+                    type: string
+                    example: "admin"
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/generate-reports:
+    post:
+      summary: Generate monthly reports
+      description: Generate and send monthly activity reports (Admin only)
+      tags:
+        - Admin
+        - Tasks
+      responses:
+        '200':
+          description: Report generation task started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+                    example: "report-def456"
+                  user_id:
+                    type: string
+                    example: "1"
+                  user_role:
+                    type: string
+                    example: "admin"
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ==================== CACHE MANAGEMENT ====================
+  /api/cache-status:
+    get:
+      summary: Get cache status
+      description: Check the status of Redis cache (Admin only)
+      tags:
+        - Admin
+        - Cache
+      responses:
+        '200':
+          description: Cache status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  parkingLots:
+                    type: boolean
+                    example: true
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/clear-cache:
+    post:
+      summary: Clear cache
+      description: Clear all cached data from Redis (Admin only)
+      tags:
+        - Admin
+        - Cache
+      responses:
+        '200':
+          description: Cache cleared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Cache cleared successfully"
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+# ==================== COMPONENTS ====================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        username:
+          type: string
+          example: "john_doe"
+        email:
+          type: string
+          format: email
+          example: "john@example.com"
+        role:
+          type: string
+          enum: [user, admin]
+          example: "user"
+
+    ParkingLot:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        prime_location_name:
+          type: string
+          example: "Downtown Mall"
+        price:
+          type: number
+          example: 10.0
+        address:
+          type: string
+          example: "123 Main St, City"
+        pin_code:
+          type: string
+          example: "12345"
+        number_of_spots:
+          type: integer
+          example: 50
+        available_spots:
+          type: integer
+          example: 35
+
+    CreateParkingLotRequest:
+      type: object
+      required:
+        - prime_location_name
+        - price
+        - address
+        - pin_code
+        - number_of_spots
+      properties:
+        prime_location_name:
+          type: string
+          example: "Downtown Mall"
+        price:
+          type: number
+          example: 10.0
+        address:
+          type: string
+          example: "123 Main St, City"
+        pin_code:
+          type: string
+          example: "12345"
+        number_of_spots:
+          type: integer
+          example: 50
+
+    CostBreakdown:
+      type: object
+      properties:
+        base_cost:
+          type: number
+          example: 10.0
+        hourly_rate:
+          type: number
+          example: 10.0
+        total_hours:
+          type: number
+          example: 2.5
+        additional_hours:
+          type: number
+          example: 1.5
+        additional_cost:
+          type: number
+          example: 15.0
+        total_cost:
+          type: number
+          example: 25.0
+        calculation_time:
+          type: string
+          format: date-time
+
+    Reservation:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        spot_number:
+          type: integer
+          example: 5
+        lot_name:
+          type: string
+          example: "Downtown Mall"
+        vehicle_number:
+          type: string
+          example: "ABC-123"
+        parking_timestamp:
+          type: string
+          format: date-time
+        leaving_timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        parking_cost:
+          type: number
+          example: 25.0
+        status:
+          type: string
+          enum: [active, parked out, completed]
+          example: "parked out"
+        cost_breakdown:
+          $ref: '#/components/schemas/CostBreakdown'
+
+    AdminReservation:
+      allOf:
+        - $ref: '#/components/schemas/Reservation'
+        - type: object
+          properties:
+            username:
+              type: string
+              example: "john_doe"
+            lot:
+              type: string
+              example: "Downtown Mall"
+
+    LotReservationDetails:
+      type: object
+      properties:
+        lot_id:
+          type: integer
+          example: 1
+        total_spots:
+          type: integer
+          example: 50
+        occupied_count:
+          type: integer
+          example: 15
+        summary:
+          type: array
+          items:
+            type: object
+            properties:
+              spot_number:
+                type: integer
+                example: 1
+              status:
+                type: string
+                enum: [A, O]
+                example: "O"
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              username:
+                type: string
+                example: "john_doe"
+              spot_number:
+                type: integer
+                example: 1
+              vehicle_number:
+                type: string
+                example: "ABC-123"
+              parking_timestamp:
+                type: string
+                format: date-time
+              leaving_timestamp:
+                type: string
+                format: date-time
+                nullable: true
+              status:
+                type: string
+                example: "Occupied"
+
+    AdminDashboard:
+      type: object
+      properties:
+        total_lots:
+          type: integer
+          example: 5
+        total_spots:
+          type: integer
+          example: 250
+        occupied_spots:
+          type: integer
+          example: 75
+        available_spots:
+          type: integer
+          example: 175
+        total_users:
+          type: integer
+          example: 150
+        active_reservations:
+          type: integer
+          example: 75
+
+    AdminUserView:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        username:
+          type: string
+          example: "john_doe"
+        email:
+          type: string
+          example: "john@example.com"
+        phone:
+          type: string
+          example: "+1234567890"
+        created_at:
+          type: string
+          format: date-time
+        total_reservations:
+          type: integer
+          example: 25
+
+    AdminStatistics:
+      type: object
+      properties:
+        revenue:
+          type: object
+          properties:
+            months:
+              type: array
+              items:
+                type: string
+              example: ["January 2024", "February 2024", "March 2024"]
+            revenue:
+              type: array
+              items:
+                type: number
+              example: [1250.0, 1580.0, 1920.0]
+        utilization:
+          type: object
+          properties:
+            lots:
+              type: array
+              items:
+                type: string
+              example: ["Downtown Mall", "Airport Parking", "City Center"]
+            utilization:
+              type: array
+              items:
+                type: number
+              example: [75.5, 60.2, 85.0]
+        trends:
+          type: object
+          properties:
+            days:
+              type: array
+              items:
+                type: string
+              example: ["01/20", "01/21", "01/22", "01/23", "01/24", "01/25", "01/26"]
+            reservations:
+              type: array
+              items:
+                type: integer
+              example: [12, 15, 8, 20, 25, 18, 22]
+
+    UserStatistics:
+      type: object
+      properties:
+        spending:
+          type: object
+          properties:
+            months:
+              type: array
+              items:
+                type: string
+              example: ["January 2024", "February 2024", "March 2024"]
+            spending:
+              type: array
+              items:
+                type: number
+              example: [125.0, 158.0, 192.0]
+        duration:
+          type: object
+          properties:
+            durations:
+              type: array
+              items:
+                type: integer
+              description: "Array representing [<1h, 1-3h, 3-6h, 6+h] parking sessions"
+              example: [5, 8, 3, 1]
+
+    TaskStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [PENDING, PROGRESS, SUCCESS, FAILURE, ERROR]
+          example: "SUCCESS"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 100
+        result:
+          type: object
+          nullable: true
+          example: {"status": "completed", "download_key": "csv_export_123_456"}
+        error:
+          type: string
+          nullable: true
+          example: null
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Error description"
+        error:
+          type: string
+          nullable: true
+          example: "Detailed error information"
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Authentication required"
+
+    ForbiddenError:
+      description: Admin access required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Admin access required"
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Resource not found"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: "Internal server error"
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Authentication
+    description: User registration and login
+  - name: Parking Lots
+    description: Parking lot management operations
+  - name: Reservations
+    description: Parking spot reservation operations
+  - name: Admin
+    description: Administrative operations
+  - name: Dashboard
+    description: Dashboard data endpoints
+  - name: Statistics
+    description: Analytics and statistics
+  - name: Export
+    description: Data export functionality
+  - name: Tasks
+    description: Background task management
+  - name: Cache
+    description: Cache management operations
+  - name: Users
+    description: User management operations
