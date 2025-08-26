@@ -218,8 +218,9 @@ ParkWise/
 │       └── parking_app.db     # SQLite database
 └── frontend/
     ├── src/
-    │   ├── components/        # Vue components
+    │   ├── components/       # Vue components
     │   ├── pages/            # Page components
+    │   ├── assets/           # Static assets (css, images, fonts, etc)
     │   ├── services/         # API service layers
     │   ├── store/           # Pinia state management
     │   └── router/          # Vue Router configuration
