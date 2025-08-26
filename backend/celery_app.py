@@ -30,10 +30,10 @@ celery_app.conf.update(
 MAIL_CONFIG = {
     'MAIL_SERVER': 'smtp.gmail.com',
     'MAIL_PORT': 587,
-    'MAIL_USERNAME': '23f2003857@ds.study.iitm.ac.in',
-    'MAIL_PASSWORD': 'azka acvo kxgz cear',
+    'MAIL_USERNAME': '<YOUR-EMAIL-ID-HERE>',
+    'MAIL_PASSWORD': '<YOUR-MAIL-PASSWORD-HERE>',
     'MAIL_USE_TLS': True,
-    'GCHAT_WEBHOOK_URL': 'https://chat.googleapis.com/v1/spaces/AAQAdVg03Bk/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=nXCgKXHud1RATZRA52e4vaIac-X6r9WpfzC3nN6v-MA'
+    'GCHAT_WEBHOOK_URL': '<YOUR-GOOGLE-WEBHOOK-API-LINK>'
 }
 
 # Helper functions
